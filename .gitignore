@@ -1,0 +1,218 @@
+# =============================================================
+# MUJI Semantic Mother Machine — Strict .gitignore
+# Policy: ONLY source code & plain-text config files are tracked.
+# Everything else (binaries, archives, dictionaries, images,
+# fonts, models, data files, packages) is FORBIDDEN.
+# =============================================================
+
+# ---------- Build artifacts (all) ----------
+build/
+cmake-build-*/
+bin/
+out/
+dist/
+target/
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.out
+*.app
+*.class
+*.jar
+*.war
+*.ear
+
+# ---------- Packages & archives ----------
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tbz2
+*.tar.xz
+*.txz
+*.zip
+*.rar
+*.7z
+*.gz
+*.bz2
+*.xz
+*.deb
+*.rpm
+*.apk
+*.pkg
+*.dmg
+*.iso
+
+# ---------- Dictionaries & lexical data (FORBIDDEN) ----------
+dic/
+*.mdx
+*.mdd
+*.dwm
+*.dict
+*.aff
+*.dic
+*.zim
+*.star.dict
+*.ifo
+*.idx
+
+# ---------- ML / data / model files ----------
+*.bin
+*.dat
+*.db
+*.sqlite
+*.sqlite3
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.pt
+*.pth
+*.onnx
+*.pb
+*.tflite
+*.model
+*.weights
+*.safetensors
+*.gguf
+*.ggml
+
+# ---------- Images ----------
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.ico
+*.svg
+*.webp
+*.tiff
+*.tif
+*.ppm
+*.pgm
+
+# ---------- Fonts ----------
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
+
+# ---------- Audio / Video ----------
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.flac
+*.ogg
+*.webm
+
+# ---------- Documents (binary / proprietary) ----------
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.odt
+*.ods
+*.odp
+*.rtf
+
+# ---------- IDE / editor ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ---------- Logs ----------
+*.log
+logs/
+
+# ---------- CMake / build system caches ----------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# ---------- Local config / secrets ----------
+.local.ini
+config.local.json
+*.local
+.env
+.env.*
+!.env.example
+
+# ---------- ImGui runtime ----------
+imgui.ini
+
+# ---------- Toolchain / cross-compile roots ----------
+toolchain-rootfs/
+dictd-data/
+kiwix-desktop-qt/
+
+# ---------- 3rdparty vendored DATA (keep source, exclude data) ----------
+# cppjieba dict & test data (big lexical blobs, not source)
+3rdparty/cppjieba/dict/*.utf8
+3rdparty/cppjieba/dict/*.gbk
+3rdparty/cppjieba/dict/**/*.utf8
+3rdparty/cppjieba/dict/**/*.gbk
+3rdparty/cppjieba/test/testdata/
+
+# imgui fonts (binary TTF) — but keep the source tool
+3rdparty/imgui-docking/misc/fonts/*
+!3rdparty/imgui-docking/misc/fonts/binary_to_compressed_c.cpp
+
+# ---------- Test / benchmark outputs ----------
+*.result
+benchmark_*
+
+# ---------- OS / misc ----------
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.rej
+*.patch
+
+# ---------- Python ----------
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ---------- Node ----------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# ---------- Rust ----------
+Cargo.lock
+
+# ---------- Go ----------
+vendor/
