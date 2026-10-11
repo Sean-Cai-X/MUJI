@@ -64,11 +64,11 @@ public:
 
     // ── Helpers for subclasses ──────────────────────────────────────
 protected:
-    void set_status(AdapterStatus s) {
+    void set_status(AdapterStatus s) const {
         std::lock_guard<std::mutex> lk(mu_);
         status_ = s;
     }
-    void set_last_error(std::string msg) {
+    void set_last_error(std::string msg) const {
         std::lock_guard<std::mutex> lk(mu_);
         last_error_ = std::move(msg);
         status_ = AdapterStatus::Error;
@@ -76,8 +76,8 @@ protected:
 
     const std::string name_;
     mutable std::mutex mu_;
-    AdapterStatus status_ = AdapterStatus::Uninitialized;
-    std::string   last_error_;
+    mutable AdapterStatus status_ = AdapterStatus::Uninitialized;
+    mutable std::string   last_error_;
 };
 
 } // namespace muji

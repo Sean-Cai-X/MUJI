@@ -42,11 +42,23 @@ WordNetAdapter::~WordNetAdapter() { shutdown(); }
 bool WordNetAdapter::init() {
     if (initialized_) return true;
 
-    // Point libwn at the WordNet database
-    setenv("WNSEARCHPATH", config_.dict_path.c_str(), 1);
+    // libwordnet 认 WNSEARCHDIR 和 WNHOME (不认 WNSEARCHPATH)
+    // WNHOME = dict_path 的父目录, WNSEARCHDIR = 完整 dict 路径
+    std::string dict_dir = config_.dict_path;
+    std::string wn_home = dict_dir;
+    // 如果 dict_path 以 "/dict" 结尾 (DEFAULTPATH 风格), WNHOME 就是去掉 "/dict"
+    // 但 /usr/share/wordnet 直接就是 dict 目录, 所以 WNHOME = dirname(dict_path)
+    auto slash = dict_dir.rfind('/');
+    if (slash != std::string::npos) wn_home = dict_dir.substr(0, slash);
+
+    setenv("WNHOME",     wn_home.c_str(), 1);
+    setenv("WNSEARCHDIR", dict_dir.c_str(), 1);
+    // 兼容: 也设 WNSEARCHPATH 给可能的其他组件
+    setenv("WNSEARCHPATH", dict_dir.c_str(), 1);
 
     if (wninit() != 0) {
-        set_last_error("wninit() failed — check WordNet data path: " + config_.dict_path);
+        set_last_error("wninit() failed — check WordNet data path: " + dict_dir +
+                       " (WNHOME=" + wn_home + ")");
         return false;
     }
 

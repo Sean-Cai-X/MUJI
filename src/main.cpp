@@ -15,8 +15,14 @@
 #include "3d/SemanticSceneBuilder.h"
 
 #include "adapters/JiebaAdapter.h"
+#ifdef MUJI_HAS_MECAB
+#include "adapters/MeCabAdapter.h"
+#endif
 #ifdef MUJI_HAS_WORDNET
 #include "adapters/WordNetAdapter.h"
+#endif
+#ifdef MUJI_HAS_UDPIPE
+#include "adapters/UDPipeAdapter.h"
 #endif
 #include "adapters/GoldenDictAdapter.h"
 #include "adapters/StarDictAdapter.h"
@@ -34,11 +40,18 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <filesystem>
 
 // ── Forward declarations ─────────────────────────────────────────────
 static void show_jieba_panel();
+#ifdef MUJI_HAS_MECAB
+static void show_mecab_panel();
+#endif
 #ifdef MUJI_HAS_WORDNET
 static void show_wordnet_panel();
+#endif
+#ifdef MUJI_HAS_UDPIPE
+static void show_german_panel();
 #endif
 static void show_goldendict_panel();
 static void show_stardict_panel();
@@ -63,9 +76,47 @@ static bool init_modules() {
     }
     { FILE* t = std::fopen("/tmp/muji_trigger_0.txt", "w"); if (t) { std::fprintf(t, "0-jieba-OK\n"); std::fclose(t); } }
 
+#ifdef MUJI_HAS_MECAB
+    // Layer 0b: MeCab (Japanese morphological analyzer)
+    auto mecab = muji::make_and_register<muji::MeCabAdapter>();
+    muji::MeCabConfig mecab_cfg;
+    // 优先 toolchain-rootfs 下的 ipadic-utf8 (bootstrap 解压)
+    // 如果词典目录为空, MeCabAdapter::init() 会失败但不致命
+    mecab_cfg.dicdir = "/H/aisrc/MUJI/toolchain-rootfs/var/lib/mecab/dic/ipadic-utf8";
+    if (mecab->init()) {
+        std::fprintf(stderr, "MeCabAdapter ready (dicdir=%s)\n", mecab_cfg.dicdir.c_str());
+        { FILE* t = std::fopen("/tmp/muji_trigger_0b.txt", "w"); if (t) { std::fprintf(t, "0b-mecab-OK\n"); std::fclose(t); } }
+    } else {
+        std::fprintf(stderr, "MeCabAdapter init (continuing — dicdir may be empty): %s\n",
+                     mecab->last_error().c_str());
+    }
+#endif
+
+#ifdef MUJI_HAS_UDPIPE
+    // Layer 0c: UDPipe (German + multi-language UDP pipeline)
+    auto udp = muji::make_and_register<muji::UDPipeAdapter>();
+    muji::UDPipeConfig udp_cfg;
+    // 模型文件路径 (UDPipe 原生 CLI 也支持)
+    udp_cfg.model_path = "/H/aisrc/MUJI/models/de/german-gsd.udpipe";
+    if (udp->init()) {
+        std::fprintf(stderr, "UDPipeAdapter ready (model=%s)\n", udp_cfg.model_path.c_str());
+        { FILE* t = std::fopen("/tmp/muji_trigger_0c.txt", "w"); if (t) { std::fprintf(t, "0c-udpipe-OK\n"); std::fclose(t); } }
+    } else {
+        std::fprintf(stderr, "UDPipeAdapter init (continuing — model may be missing): %s\n",
+                     udp->last_error().c_str());
+    }
+#endif
+
 #ifdef MUJI_HAS_WORDNET
     auto wn = muji::make_and_register<muji::WordNetAdapter>();
-    wn->set_config(muji::WordNetConfig{});
+    muji::WordNetConfig wn_cfg;
+    // WordNet 数据路径优先级: myfs > toolchain-rootfs > 系统默认
+    if (auto p = std::getenv("MUJI_WN_DICT")) wn_cfg.dict_path = p;
+    else if (std::filesystem::exists("/H/aisrc/ISO/iso_build/myfs/usr/share/wordnet"))
+        wn_cfg.dict_path = "/H/aisrc/ISO/iso_build/myfs/usr/share/wordnet";
+    else if (std::filesystem::exists("/H/aisrc/MUJI/toolchain-rootfs/usr/share/wordnet"))
+        wn_cfg.dict_path = "/H/aisrc/MUJI/toolchain-rootfs/usr/share/wordnet";
+    wn->set_config(wn_cfg);
     if (!wn->init()) {
         std::fprintf(stderr, "WordNetAdapter init FAILED: %s\n", wn->last_error().c_str());
         return false;
@@ -213,6 +264,205 @@ static void show_jieba_panel() {
     ImGui::TextDisabled("Native: build/bin/jieba_cli -m ex \"...\"");
     ImGui::End();
 }
+
+#ifdef MUJI_HAS_MECAB
+// ── Panel: MeCab (layer 0b — Japanese morphological analyzer) ───────
+static void show_mecab_panel() {
+    auto bus = &muji::SemanticBus::instance();
+    auto mecab = bus->get<muji::MeCabAdapter>("MeCab");
+    ImGui::SetNextWindowPos(ImVec2(10, 460), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(350, 340), ImGuiCond_Always);
+    ImGui::Begin("Layer 0b — MeCab (Japanese morphology)");
+    if (!mecab || mecab->status() != muji::AdapterStatus::Ready) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "MeCab not ready");
+        ImGui::Text("Check dicdir: %s",
+                    mecab ? mecab->config().dicdir.c_str() : "(null)");
+        ImGui::Text("Error: %s",
+                    mecab ? mecab->last_error().c_str() : "(null)");
+        ImGui::TextDisabled("Put ipadic-utf8 in toolchain-rootfs/var/lib/mecab/dic/");
+        ImGui::End(); return;
+    }
+
+    static char input_buf[512] = "東京大学情報理工学系研究科";
+    ImGui::InputTextMultiline("日本語 Input", input_buf, sizeof(input_buf), ImVec2(-1, 60));
+
+    static std::vector<muji::SemToken> last_result;
+    if (ImGui::Button("形態素解析", ImVec2(140, 28))) {
+        mecab->segment(std::string(input_buf), last_result);
+        bus->active_context().raw_text = input_buf;
+        // 注: SemanticContext.tokens 是中文分词结果, MeCab 结果单独存 (source tag 区分)
+    }
+    ImGui::SameLine(); ImGui::Text("(%zu morphemes)", last_result.size());
+    ImGui::Separator();
+
+    if (ImGui::BeginTable("mecab_tokens", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Surface");
+        ImGui::TableSetupColumn("POS");
+        ImGui::TableSetupColumn("Lemma");
+        ImGui::TableSetupColumn("Reading");
+        ImGui::TableSetupColumn("Start");
+        ImGui::TableSetupColumn("End");
+        ImGui::TableHeadersRow();
+        for (auto& t : last_result) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (t.is_oov)
+                ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "%s", t.word.c_str());
+            else
+                ImGui::TextUnformatted(t.word.c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1, 1), "%s", t.pos.c_str());
+            ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(t.lemma.c_str());
+            ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(t.reading.c_str());
+            ImGui::TableSetColumnIndex(4); ImGui::Text("%d", t.start);
+            ImGui::TableSetColumnIndex(5); ImGui::Text("%d", t.end);
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::TextDisabled("Native: build/bin/mecab_cli -d <dicdir> \"...\"");
+    ImGui::End();
+}
+#endif
+
+#ifdef MUJI_HAS_UDPIPE
+// ── Panel: UDPipe (layer 0c — German UDP morphological analysis + compound splits) ─
+static void show_german_panel() {
+    auto bus = &muji::SemanticBus::instance();
+    auto udp = bus->get<muji::UDPipeAdapter>("UDPipe");
+    ImGui::SetNextWindowPos(ImVec2(10, 820), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_Always);
+    ImGui::Begin("Layer 0c — UDPipe (German UDP + Compound Split)");
+    if (!udp || udp->status() != muji::AdapterStatus::Ready) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "UDPipe not ready");
+        ImGui::Text("Check model path: %s",
+                    udp ? udp->config().model_path.c_str() : "(null)");
+        ImGui::Text("Error: %s",
+                    udp ? udp->last_error().c_str() : "(null)");
+        ImGui::TextDisabled("Download german-gsd.udpipe from https://lindat.mff.cuni.cz/...");
+        ImGui::End(); return;
+    }
+
+    // ═══ 第一部分: UDPipe 分词 + 词性标注 ═══
+    ImGui::CollapsingHeader("UDPipe Morphological Analysis (分词+词性+lemma)",
+                            ImGuiTreeNodeFlags_DefaultOpen);
+
+    static char input_buf[512] = "Die Handyaufladestation speichert Daten in einem Speicher.";
+    ImGui::InputTextMultiline("Deutsch Input", input_buf, sizeof(input_buf), ImVec2(-1, 60));
+
+    // UDPipe 配置选项
+    auto cfg = udp->config();
+    static bool tag_on = true;
+    static bool lemma_on = true;
+    static bool parse_on = false;
+    static int upos_sel = 0;  // 0=UPOS, 1=XPOS/STTS
+    ImGui::SameLine(); ImGui::Checkbox("Tag", &tag_on);
+    ImGui::SameLine(); ImGui::Checkbox("Lemma", &lemma_on);
+    ImGui::SameLine(); ImGui::Checkbox("Parse", &parse_on);
+    ImGui::SameLine(); ImGui::Combo("POS", &upos_sel, "UPOS\0XPOS/STTS\0");
+
+    cfg.tag = tag_on; cfg.lemmatize = lemma_on; cfg.parse = parse_on;
+    cfg.upos_mode = (upos_sel == 0) ? "upos" : "xpos";
+
+    static std::vector<muji::SemToken> last_result;
+    if (ImGui::Button("Analysieren", ImVec2(140, 28))) {
+        udp->set_config(cfg);
+        // UDPipe 走 CLI subprocess 模式 — 每次调用都是新进程, 不需要 reload 内部状态
+        udp->segment(std::string(input_buf), last_result);
+    }
+    ImGui::SameLine(); ImGui::Text("(%zu tokens)", last_result.size());
+
+    // Token 表格
+    if (!last_result.empty()) {
+        if (ImGui::BeginTable("udp_tokens", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Surface");
+            ImGui::TableSetupColumn("POS");
+            ImGui::TableSetupColumn("Lemma");
+            ImGui::TableSetupColumn("Start");
+            ImGui::TableSetupColumn("End");
+            ImGui::TableHeadersRow();
+            for (auto& t : last_result) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                // 德语名词首字母大写 → 绿色高亮
+                if (!t.word.empty() && t.word[0] >= 'A' && t.word[0] <= 'Z')
+                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.5f, 1), "%s", t.word.c_str());
+                else
+                    ImGui::TextUnformatted(t.word.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1, 1), "%s", t.pos.c_str());
+                ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(t.lemma.c_str());
+                ImGui::TableSetColumnIndex(3); ImGui::Text("%d", t.start);
+                ImGui::TableSetColumnIndex(4); ImGui::Text("%d", t.end);
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    // ═══ 第二部分: 德语复合词拆分候选路径可视化 ═══
+    ImGui::CollapsingHeader("Deutsche Kompositum-Zerlegung (复合词拆分候选路径)",
+                            ImGuiTreeNodeFlags_DefaultOpen);
+
+    // 输入要拆分的复合词 (可以从 token 表格里点选, 这里手动输入)
+    static char compound_buf[256] = "Handyaufladestation";
+    ImGui::InputText("Kompositum", compound_buf, sizeof(compound_buf));
+
+    static std::vector<muji::CompoundSplit> last_splits;
+    if (ImGui::Button("Zerlegen", ImVec2(140, 28))) {
+        last_splits = udp->split_compound(std::string(compound_buf), 3);
+    }
+    ImGui::SameLine(); ImGui::Text("(%zu candidates)", last_splits.size());
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.9f, 0.85f, 0.4f, 1),
+                       "原词: %s", compound_buf);
+    ImGui::TextWrapped("德语复合词可以有多种拆分路径 — 每条候选用不同颜色标记子词元边界:");
+
+    // 可视化: 直接在一行文本上画出各候选的边界
+    for (size_t ci = 0; ci < last_splits.size(); ++ci) {
+        auto& cs = last_splits[ci];
+        float conf = cs.confidence;
+        // 颜色按置信度: 高=绿, 中=黄, 低=红
+        ImVec4 path_color;
+        if (conf > 0.7f) path_color = ImVec4(0.4f, 1.0f, 0.5f, 1);
+        else if (conf > 0.4f) path_color = ImVec4(1.0f, 0.85f, 0.3f, 1);
+        else                 path_color = ImVec4(1.0f, 0.4f, 0.4f, 1);
+
+        char label[256];
+        std::snprintf(label, sizeof(label), "Kandidat %zu (conf=%.2f) — ", ci, conf);
+
+        // 用 ImGui 原生 tree 展示路径
+        if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_Selected)) {
+            ImGui::SameLine();
+            // 先画完整的原词, 然后在下面画子词元拆分
+            ImGui::TextColored(path_color, "%s", cs.original.c_str());
+
+            // 展示各 part
+            for (size_t pi = 0; pi < cs.parts.size(); ++pi) {
+                auto& part = cs.parts[pi];
+                char part_label[256];
+                std::snprintf(part_label, sizeof(part_label),
+                              "  [%zu] \"%s\" → lemma=\"%s\" pos=%s",
+                              pi, part.surface.c_str(),
+                              part.lemma.c_str(), part.pos.c_str());
+                ImGui::BulletTextColored(path_color, "%s", part_label);
+            }
+
+            // GermaNet 对齐占位 (未来对接)
+            ImGui::TextDisabled("(TODO: GermaNet synset lookup for each sub-word)");
+            ImGui::TreePop();
+        }
+    }
+
+    if (last_splits.empty()) {
+        ImGui::TextDisabled("点击 Zerlegen 查看拆分候选");
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Native: build/bin/udpipe_cli . --outfmt conllu -m models/de/german-gsd.udpipe <text>");
+    ImGui::End();
+}
+#endif
 
 #ifdef MUJI_HAS_WORDNET
 // ── Panel: WordNet (layer 1) ────────────────────────────────────────
@@ -997,6 +1247,12 @@ int main(int /*argc*/, char** /*argv*/) {
         }
 
         show_jieba_panel();
+#ifdef MUJI_HAS_MECAB
+        show_mecab_panel();
+#endif
+#ifdef MUJI_HAS_UDPIPE
+        show_german_panel();
+#endif
 #ifdef MUJI_HAS_WORDNET
         show_wordnet_panel();
 #endif

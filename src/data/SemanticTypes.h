@@ -37,6 +37,16 @@ enum class SourceTag : uint8_t {
     WikiLink       = 32,  // layer 3 — Wiki link between entities
     VectorDerived  = 40,  // layer 4 — computed in vector engine
     LanAgentMCP    = 50,  // bridge   — codex-lan-agent MCP service (HTTP JSON-RPC)
+    MeCabMorpheme  = 3,   // layer 0b — MeCab 日文形态素 (与 Jieba 并列的第二分词入口)
+    MeCabUserDict  = 4,   // layer 0b — MeCab 命中用户自定义词典
+    UDPipeToken    = 5,   // layer 0c — UDPipe 德语/多语言分词 + UDP 词性标注
+    UDPipeLemma    = 6,   // layer 0c — UDPipe 词形还原结果
+    CompoundSplit  = 7,   // layer 0d — 德语复合词拆分子词元 (decompound / CompoundSplit)
+    JapaneseWordNetSynset = 13,  // layer 1b — Japanese WordNet (wn-ja) 日义项节点
+    JapaneseWordNetRel    = 14,  // layer 1b — Japanese WordNet 关系
+    GermaNetSynset = 12,  // layer 1c — GermaNet 德语词网义项节点
+    GermaNetRel    = 15,  // layer 1c — GermaNet 关系
+    CrossLingualAlign = 16, // layer 1x — 跨语言 synset 对齐 (WN-EN ↔ WN-JA ↔ GermaNet via ILI)
 };
 
 inline const char* to_cstr(SourceTag t) {
@@ -44,6 +54,8 @@ inline const char* to_cstr(SourceTag t) {
         case SourceTag::Unknown:       return "Unknown";
         case SourceTag::JiebaToken:    return "JiebaToken";
         case SourceTag::JiebaUserDict: return "JiebaUserDict";
+        case SourceTag::MeCabMorpheme: return "MeCabMorpheme";
+        case SourceTag::MeCabUserDict: return "MeCabUserDict";
         case SourceTag::WordNetSynset: return "WordNetSynset";
         case SourceTag::WordNetRel:    return "WordNetRel";
         case SourceTag::GoldenDict:    return "GoldenDict";
@@ -54,6 +66,14 @@ inline const char* to_cstr(SourceTag t) {
         case SourceTag::WikiLink:      return "WikiLink";
         case SourceTag::VectorDerived: return "VectorDerived";
         case SourceTag::LanAgentMCP:   return "LanAgentMCP";
+        case SourceTag::UDPipeToken:   return "UDPipeToken";
+        case SourceTag::UDPipeLemma:   return "UDPipeLemma";
+        case SourceTag::CompoundSplit: return "CompoundSplit";
+        case SourceTag::GermaNetSynset: return "GermaNetSynset";
+        case SourceTag::GermaNetRel:   return "GermaNetRel";
+        case SourceTag::JapaneseWordNetSynset: return "JWN_Synset";
+        case SourceTag::JapaneseWordNetRel:    return "JWN_Rel";
+        case SourceTag::CrossLingualAlign: return "CrossLingualAlign";
     }
     return "?";
 }
@@ -69,13 +89,38 @@ struct DictEntry {
 
 // ── Layer 0: Jieba token ────────────────────────────────────────────
 struct SemToken {
-    std::string word;           // 词形 e.g. "NUMA", "内存"
-    std::string pos;            // 词性 e.g. "n", "v", "eng"
+    std::string word;           // 词形 e.g. "NUMA", "内存", "情報処理"
+    std::string pos;            // 词性 e.g. "n", "v", "eng", "名詞"
     int32_t     start = 0;      // 原文起始偏移
     int32_t     end   = 0;      // 原文结束偏移
     bool        is_oov = false; // 未登录词
     bool        hit_user_dict = false; // 命中自定义词典
     SourceTag   source = SourceTag::JiebaToken;
+
+    // MeCab 扩展字段 (Jieba 保持默认空值, 零侵入)
+    std::string lemma;          // 原形/词典形 e.g. "情報処理" (MeCab 用), 对应 WordNet lemmas
+    std::string reading;        // 读音 (カタカナ) e.g. "ジョウホウショリ" (MeCab 用)
+};
+
+// ── Layer 0d: German compound word split candidates ────────────────
+// 德语复合词拆分结果 —— 一个表层 token 可能对应多条候选拆分路径。
+// 示例: "Handyaufladestation" →
+//   Candidate 0 (best): [Handy] [Auflade] [Station]  score=0.95
+//   Candidate 1       : [Hand] [y] [Auflade] [Station]  score=0.41
+struct CompoundSplit {
+    std::string original;          // 原表层词 e.g. "Handyaufladestation"
+    float       confidence = 0.0f; // 候选置信度 0~1
+    SourceTag   source = SourceTag::CompoundSplit;
+
+    // 一条拆分路径 = 多个 sub-word (子词元)
+    struct SubWord {
+        std::string surface;    // 拆分后的表层 e.g. "Auflade"
+        std::string lemma;      // 子词原形/词典形 e.g. "Aufladen"
+        std::string pos;        // 子词词性 (UDP) e.g. "VERB"
+        int32_t     start = 0;  // 在原词中的起始偏移
+        int32_t     end   = 0;  // 在原词中的结束偏移
+    };
+    std::vector<SubWord> parts;
 };
 
 // ── Layer 1: WordNet synset ────────────────────────────────────────

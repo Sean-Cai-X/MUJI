@@ -128,6 +128,50 @@ else()
     set(MUJI_HAS_KIWIX OFF)
 endif()
 
+# ---------- MeCab (Japanese morphological analyzer) — C API, optional ----------
+# Search order: toolchain-rootfs first, then system
+set(MECAB_ROOTFS "${CMAKE_SOURCE_DIR}/toolchain-rootfs/usr")
+find_library(MECAB_LIB mecab
+    HINTS ${MECAB_ROOTFS}/lib/x86_64-linux-gnu ${MECAB_ROOTFS}/lib
+          /usr/lib/x86_64-linux-gnu /usr/lib
+    NO_DEFAULT_PATH)
+find_path(MECAB_INC mecab.h
+    HINTS ${MECAB_ROOTFS}/include /usr/include
+    NO_DEFAULT_PATH)
+# Also try default search (in case toolchain-rootfs not populated yet)
+if(NOT MECAB_LIB)
+    find_library(MECAB_LIB mecab)
+    find_path(MECAB_INC mecab.h)
+endif()
+if(MECAB_LIB AND MECAB_INC)
+    add_library(muji_mecab INTERFACE)
+    target_include_directories(muji_mecab INTERFACE ${MECAB_INC})
+    target_link_libraries(muji_mecab INTERFACE ${MECAB_LIB})
+    message(STATUS "MUJI: MeCab C API found (${MECAB_LIB}, ${MECAB_INC})")
+    set(MUJI_HAS_MECAB ON)
+else()
+    message(STATUS "MUJI: MeCab C API NOT found — MeCab adapter disabled")
+    set(MUJI_HAS_MECAB OFF)
+endif()
+
+# ---------- UDPipe (German + multi-language UDP pipeline) — CLI subprocess mode ----------
+# UDPipe 没有稳定的 C API; 我们用 subprocess 调用 udpipe CLI 二进制
+# 输出 CoNLL-U 格式 → UDPipeAdapter 解析成统一 SemToken
+find_program(UDPIPE_BIN udpipe
+    HINTS /usr/bin /usr/local/bin
+          ${CMAKE_SOURCE_DIR}/toolchain-rootfs/usr/bin
+    NO_DEFAULT_PATH)
+if(NOT UDPIPE_BIN)
+    find_program(UDPIPE_BIN udpipe)
+endif()
+if(UDPIPE_BIN)
+    message(STATUS "MUJI: udpipe CLI found (${UDPIPE_BIN}) — UDPipe adapter enabled (subprocess mode)")
+    set(MUJI_HAS_UDPIPE ON)
+else()
+    message(STATUS "MUJI: udpipe CLI NOT found — UDPipe adapter disabled")
+    set(MUJI_HAS_UDPIPE OFF)
+endif()
+
 # ---------- codex-lan-agent MCP bridge adapter (pure socket + vendored nlohmann/json) ----------
 # Zero external deps — nlohmann/json is a vendored directory at 3rdparty/nlohmann/
 # We set include dir to 3rdparty/ (parent) so #include <nlohmann/json.hpp> resolves.
@@ -173,6 +217,20 @@ if(MUJI_HAS_KIWIX)
     )
 endif()
 
+if(MUJI_HAS_MECAB)
+    list(APPEND MUJI_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/adapters/MeCabAdapter.cpp
+        ${CMAKE_SOURCE_DIR}/src/adapters/MeCabAdapter.h
+    )
+endif()
+
+if(MUJI_HAS_UDPIPE)
+    list(APPEND MUJI_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/adapters/UDPipeAdapter.cpp
+        ${CMAKE_SOURCE_DIR}/src/adapters/UDPipeAdapter.h
+    )
+endif()
+
 # Layer 4: TraceableVector stub (always on — pure C++, no deps)
 list(APPEND MUJI_SOURCES
     ${CMAKE_SOURCE_DIR}/src/adapters/VectorAdapter.cpp
@@ -206,6 +264,8 @@ target_link_libraries(muji PRIVATE muji_imgui muji_cppjieba glfw OpenGL::GL ${CM
 target_compile_definitions(muji PRIVATE
     $<$<BOOL:${MUJI_HAS_WORDNET}>:MUJI_HAS_WORDNET>
     $<$<BOOL:${MUJI_HAS_LANAGENT}>:MUJI_HAS_LANAGENT>
+    $<$<BOOL:${MUJI_HAS_MECAB}>:MUJI_HAS_MECAB>
+    $<$<BOOL:${MUJI_HAS_UDPIPE}>:MUJI_HAS_UDPIPE>
 )
 if(MUJI_HAS_WORDNET)
     target_link_libraries(muji PRIVATE muji_wordnet)
@@ -218,6 +278,14 @@ endif()
 if(MUJI_HAS_KIWIX)
     target_link_libraries(muji PRIVATE muji_zim)
     target_compile_definitions(muji PRIVATE MUJI_HAS_KIWIX)
+endif()
+
+if(MUJI_HAS_MECAB)
+    target_link_libraries(muji PRIVATE muji_mecab)
+endif()
+
+if(MUJI_HAS_UDPIPE)
+    # UDPipe 现在是纯 subprocess 模式 — 不需要 link 任何 lib
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -248,4 +316,10 @@ if(MUJI_HAS_KIWIX)
     add_executable(kiwix_cli ${CMAKE_SOURCE_DIR}/src/native/kiwix_cli.cpp)
     target_link_libraries(kiwix_cli PRIVATE muji_zim)
     set_target_properties(kiwix_cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+endif()
+
+if(MUJI_HAS_MECAB)
+    add_executable(mecab_cli ${CMAKE_SOURCE_DIR}/src/native/mecab_cli.cpp)
+    target_link_libraries(mecab_cli PRIVATE muji_mecab)
+    set_target_properties(mecab_cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 endif()
