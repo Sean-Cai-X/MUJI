@@ -216,3 +216,31 @@ Cargo.lock
 
 # ---------- Go ----------
 vendor/
+
+# ---------- WordNet / Semantic DB data ----------
+*.db
+*.db-wal
+*.db-shm
+wnjpn.db
+semantic.db
+english-wordnet-*.xml
+english-wordnet-*.xml.gz
+odenet-*/
+odenet_import.py
+jwn_import.py
+omw_import.py
+muji_crosslingual_test.py
+
+# ---------- Mecab dictionary binaries ----------
+toolchain-rootfs/var/lib/mecab/dic/ipadic-utf8/
+ipadic_build/
+mecab-bin/
+mecab-dev/
+
+# ---------- apt / download cache ----------
+/H/usr/aisrc/apt/*
+/H/usr/aisrc/mecab-bin/*
+/H/usr/aisrc/odenet-1.4/*
+/H/usr/aisrc/wnjpn.db
+/H/usr/aisrc/english-wordnet-2024.xml
+/H/usr/aisrc/sqlite/semantic.db
