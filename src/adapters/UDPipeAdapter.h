@@ -81,6 +81,10 @@ private:
     std::string call_cli(const std::string& text) const;
     std::string call_rest(const std::string& text) const;
 
+    // decompound_cli JSON → CompoundSplit (极简 parser)
+    std::vector<CompoundSplit> parse_decompound_json(
+        const std::string& json, const std::string& original_word) const;
+
     // 探测 REST 连通性
     bool probe_rest() const;
 };

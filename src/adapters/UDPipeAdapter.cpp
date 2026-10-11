@@ -16,6 +16,7 @@
 #include <cstring>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -299,46 +300,240 @@ bool UDPipeAdapter::segment(const std::string& text,
     return !out.empty();
 }
 
-// ── 德语复合词拆分 (启发式 fallback) ──
+// ── 德语复合词拆分: 原生 CLI subprocess → fallback 启发式 ──
 std::vector<CompoundSplit> UDPipeAdapter::split_compound(
     const std::string& compound_word,
     int max_candidates) const {
 
-    std::vector<CompoundSplit> result;
-    if (compound_word.empty()) return result;
+    if (compound_word.empty()) return {};
 
+    // 先尝试调用原生 decompound_cli (subprocess, 无库依赖)
+    static std::string decompound_cli_path;
+    if (decompound_cli_path.empty()) {
+        // 候选路径: CMake build target 产出位置 + 标准安装位置 + PATH
+        const char* candidates[] = {
+            "./build/bin/decompound_cli",
+            "/H/usr/aisrc/MUJI/build/bin/decompound_cli",
+            "/H/usr/aisrc/bin/decompound_cli",
+            nullptr
+        };
+        for (int i = 0; candidates[i]; ++i) {
+            if (access(candidates[i], X_OK) == 0) { decompound_cli_path = candidates[i]; break; }
+        }
+    }
+
+    if (!decompound_cli_path.empty()) {
+        // 构造命令: decompound_cli --max N "word"
+        std::string escaped = compound_word;
+        // 简单转义单引号 (德语里很少有, 但防御性处理)
+        for (size_t i = 0; i < escaped.size(); ++i)
+            if (escaped[i] == '\'') escaped.replace(i--, 1, "'\\''");
+        std::string cmd = decompound_cli_path + " --max " + std::to_string(max_candidates)
+                        + " '" + escaped + "' 2>/dev/null";
+
+        std::string json_out = run_cmd(cmd);
+        if (!json_out.empty()) {
+            std::vector<CompoundSplit> parsed = parse_decompound_json(json_out, compound_word);
+            if (!parsed.empty()) return parsed;
+        }
+    }
+
+    // Fallback: 启发式后缀列表 (与旧版相同, 但已经是 inferior)
+    std::vector<CompoundSplit> result;
     static const char* suffixes[] = {
-        "ung", "heit", "keit", "tion", "ität", "isch", "lich", "los",
-        "station", "haus", "werk", "karte", "speicher", "platz", "kraft",
-        "handy", "auflade", "fern", "seh", "fernseher"
+        "leistung", "begrenzung", "geschwindigkeit", "station", "leitung",
+        "ung", "heit", "keit", "tion", "ität",
+        "speicher", "haus", "werk", "karte", "platz", "kraft"
     };
     const int n_suffix = sizeof(suffixes) / sizeof(suffixes[0]);
+    std::sort(suffixes, suffixes + n_suffix,
+              [](const char* a, const char* b) { return strlen(a) > strlen(b); });
 
-    // Candidate 0: 整体不拆分
     {
-        CompoundSplit cs;
-        cs.original = compound_word;
-        cs.confidence = 0.5f;
+        CompoundSplit cs; cs.original = compound_word; cs.confidence = 0.5f;
         cs.parts.push_back({compound_word, compound_word, "NOUN", 0, (int32_t)compound_word.size()});
         result.push_back(std::move(cs));
     }
-
     for (int si = 0; si < n_suffix && (int)result.size() < max_candidates; ++si) {
-        const char* suf = suffixes[si];
-        size_t slen = strlen(suf);
-        size_t pos = compound_word.find(suf);
-        if (pos != std::string::npos && pos + slen < compound_word.size()) {
-            CompoundSplit cs;
-            cs.original = compound_word;
-            cs.confidence = 0.35f;
-            std::string first = compound_word.substr(0, pos + slen);
-            std::string rest  = compound_word.substr(pos + slen);
-            cs.parts.push_back({first, first, "NOUN", 0, (int32_t)first.size()});
-            cs.parts.push_back({rest, rest, "NOUN", (int32_t)first.size(), (int32_t)compound_word.size()});
+        size_t slen = strlen(suffixes[si]);
+        if (slen >= compound_word.size()) continue;
+        for (size_t pos = 1; pos <= compound_word.size() - slen; ++pos) {
+            if (compound_word.compare(pos, slen, suffixes[si]) != 0) continue;
+            std::string root = compound_word.substr(0, pos);
+            std::string rest = compound_word.substr(pos, slen);
+            if (root.size() < 3 || rest.size() < 3) continue;
+            CompoundSplit cs; cs.original = compound_word; cs.confidence = 0.3f;
+            cs.parts.push_back({root, root, "NOUN", 0, (int32_t)root.size()});
+            cs.parts.push_back({rest, rest, "NOUN", (int32_t)root.size(), (int32_t)(root.size() + slen)});
             result.push_back(std::move(cs));
+            break;
         }
     }
     return result;
+}
+
+// ── decompound_cli JSON 输出 → CompoundSplit (极简 JSON parser) ──
+// 格式示例:
+//   {"word":"Speicherleistung","n_candidates":3,"candidates":[
+//     {"confidence":0.765,"source":1,"parts":[
+//       {"surface":"Speicher","lemma":"Speicher","pos":"NOUN","start":0,"end":8},
+//       {"surface":"leistung","lemma":"leistung","pos":"NOUN","start":8,"end":16}
+//     ]}
+//   ]}
+std::vector<CompoundSplit> UDPipeAdapter::parse_decompound_json(
+    const std::string& json,
+    const std::string& original_word) const {
+
+    std::vector<CompoundSplit> out;
+
+    // 从左扫到右, 找 "candidates": [ ... ] 数组
+    size_t cands_key = json.find("\"candidates\"");
+    if (cands_key == std::string::npos) return out;
+    size_t arr_begin = json.find('[', cands_key);
+    if (arr_begin == std::string::npos) return out;
+
+    // 逐层找每个 "parts":[ ... ] 对象块
+    size_t search_from = arr_begin;
+    while (true) {
+        size_t pkey = json.find("\"parts\"", search_from);
+        if (pkey == std::string::npos) break;
+
+        // 找对应的数组起始和闭合
+        size_t pstart = json.find('[', pkey);
+        if (pstart == std::string::npos) break;
+        int depth = 1;
+        size_t pend = pstart + 1;
+        for (; pend < json.size() && depth > 0; ++pend) {
+            char c = json[pend];
+            if (c == '[') ++depth;
+            else if (c == ']') --depth;
+            else if (c == '"') {
+                // 跳过字符串里的 bracket
+                ++pend;
+                while (pend < json.size()) {
+                    if (json[pend] == '\\') { ++pend; ++pend; continue; }
+                    if (json[pend] == '"') break;
+                    ++pend;
+                }
+            }
+        }
+        if (depth != 0) break;
+
+        // 提取 confidence
+        float conf = 0.0f;
+        size_t conf_key = json.rfind("\"confidence\"", pkey);
+        if (conf_key != std::string::npos && conf_key > pstart) {
+            size_t colon = json.find(':', conf_key);
+            if (colon != std::string::npos)
+                conf = std::stof(json.substr(colon + 1));
+        }
+
+        // 解析 parts 数组内容
+        CompoundSplit cs;
+        cs.original = original_word;
+        cs.confidence = conf;
+
+        // parts 内部每个 {"surface":"xxx",...}
+        size_t part_search = pstart + 1;
+        while (part_search < pend) {
+            size_t skey = json.find("\"surface\"", part_search);
+            if (skey == std::string::npos || skey > pend) break;
+            size_t scol = json.find(':', skey);
+            if (scol == std::string::npos) break;
+            size_t sq1 = json.find('"', scol + 1);
+            size_t sq2 = json.find('"', sq1 + 1);
+            if (sq1 == std::string::npos || sq2 == std::string::npos) break;
+            std::string surface = json.substr(sq1 + 1, sq2 - sq1 - 1);
+
+            // lemma
+            size_t lkey = json.find("\"lemma\"", sq2);
+            std::string lemma = surface;
+            if (lkey != std::string::npos && lkey < pend) {
+                size_t lcol = json.find(':', lkey);
+                size_t lq1 = json.find('"', lcol + 1);
+                size_t lq2 = json.find('"', lq1 + 1);
+                if (lq1 != std::string::npos && lq2 != std::string::npos && lq2 < pend)
+                    lemma = json.substr(lq1 + 1, lq2 - lq1 - 1);
+            }
+
+            // pos
+            size_t ppos = json.find("\"pos\"", sq2);
+            std::string pos = "?";
+            if (ppos != std::string::npos && ppos < pend) {
+                size_t pcol = json.find(':', ppos);
+                size_t pq1 = json.find('"', pcol + 1);
+                size_t pq2 = json.find('"', pq1 + 1);
+                if (pq1 != std::string::npos && pq2 != std::string::npos && pq2 < pend)
+                    pos = json.substr(pq1 + 1, pq2 - pq1 - 1);
+            }
+
+            // start / end
+            int start = 0, end = 0;
+            size_t stk = json.find("\"start\"", sq2);
+            if (stk != std::string::npos && stk < pend) {
+                size_t stc = json.find(':', stk);
+                size_t ste = json.find(',', stc);
+                start = std::stoi(json.substr(stc + 1, ste - stc - 1));
+            }
+            size_t enk = json.find("\"end\"", sq2);
+            if (enk != std::string::npos && enk < pend) {
+                size_t enc = json.find(':', enk);
+                size_t ene = json.find_first_of(",}", enc);
+                end = std::stoi(json.substr(enc + 1, ene - enc - 1));
+            }
+
+            cs.parts.push_back({surface, lemma, pos, start, end});
+            part_search = pend;  // 简化: 每个 parts block 只取最后一个 surface 前的所有
+        }
+
+        // 修正: 重新遍历 parts 找所有 surface (刚才逻辑有缺陷)
+        // 重新遍历 parts 数组里所有对象
+        cs.parts.clear();
+        size_t sub = pstart + 1;
+        while (sub < pend) {
+            size_t os = json.find('{', sub);
+            if (os == std::string::npos || os >= pend) break;
+            size_t oe = json.find('}', os);
+            if (oe == std::string::npos || oe >= pend) break;
+            std::string obj = json.substr(os, oe - os + 1);
+
+            // 从 obj 提取 surface/lemma/pos/start/end
+            auto get_str = [&](const std::string& key) -> std::string {
+                size_t k = obj.find("\"" + key + "\"");
+                if (k == std::string::npos) return "";
+                size_t c = obj.find(':', k);
+                size_t q1 = obj.find('"', c + 1);
+                size_t q2 = obj.find('"', q1 + 1);
+                if (q1 == std::string::npos || q2 == std::string::npos) return "";
+                return obj.substr(q1 + 1, q2 - q1 - 1);
+            };
+            auto get_int = [&](const std::string& key) -> int {
+                size_t k = obj.find("\"" + key + "\"");
+                if (k == std::string::npos) return 0;
+                size_t c = obj.find(':', k);
+                size_t e = obj.find_first_of(",}", c);
+                try { return std::stoi(obj.substr(c + 1, e - c - 1)); }
+                catch (...) { return 0; }
+            };
+
+            std::string surface = get_str("surface");
+            if (surface.empty()) { sub = oe + 1; continue; }
+            std::string lemma = get_str("lemma");
+            if (lemma.empty()) lemma = surface;
+            std::string pos = get_str("pos");
+            if (pos.empty()) pos = "?";
+            int start = get_int("start");
+            int end   = get_int("end");
+            cs.parts.push_back({surface, lemma, pos, start, end});
+
+            sub = oe + 1;
+        }
+
+        if (!cs.parts.empty()) out.push_back(std::move(cs));
+        search_from = pend;
+    }
+
+    return out;
 }
 
 } // namespace muji
