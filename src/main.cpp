@@ -456,8 +456,9 @@ static void show_german_panel() {
                 ImGui::Bullet(); ImGui::TextColored(path_color, "%s", part_label);
             }
 
-            // GermaNet 对齐占位 (未来对接)
-            ImGui::TextDisabled("(TODO: GermaNet synset lookup for each sub-word)");
+            // ODeNet 1.4 德语词网对齐 (Open Deutsches WordNet, CC BY-SA 4.0)
+            // TODO: 把 decompound 子词 lemma → germanet_lemma 查表 → ili_index 跨语言枢纽
+            ImGui::TextDisabled("(TODO: ODeNet synset lookup → ili_index cross-lingual hub)");
             ImGui::TreePop();
         }
     }

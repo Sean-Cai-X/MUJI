@@ -1,19 +1,20 @@
 -- src/schema/germanet_ili.sql
--- GermaNet 20.0 ILI 索引与英文 WordNet 做 synset 映射 schema
+-- ODeNet 1.4 (Open Deutsches WordNet) ILI 索引与英文 WordNet 做 synset 映射 schema
 --
--- 数据源: GermaNet (图宾根大学) https://www.sfs.uni-tuebingen.de/lsd/
---   - GermaNet 以 LMF/XML 格式发布
---   - 每个 GermaNet synset 可选携带 ILI 编号 (Inter-Lingual Index)
---   - ILI 是全局唯一的跨语言语义编号: 同一个 ILI → 同一概念 → 不同语言的 synset
---   - 英文 WordNet 3.1+ 已集成 ILI; Japanese WordNet 也在向 ILI 对齐
+-- 数据源: ODeNet 1.4 (Hochschule Darmstadt) https://github.com/hdaSprachtechnologie/odenet
+--   - WN-LMF 1.0 标准 XML 格式, CC BY-SA 4.0 开源, 无注册门槛
+--   - 36,268 synsets, 120,107 lexical entries, 100% ILI 覆盖 (每个 synset 都有 ILI)
+--   - ILI 是全局唯一的跨语言语义编号 (Inter-Lingual Index):
+--     同一个 ILI → 同一概念 → 不同语言的 synset (EN / DE / JA ...)
 --
--- 核心优势 (超越 Japanese WordNet):
---   GermaNet 20.0 ≈ 15 万德语 synset, 其中约 60% 已分配 ILI
---   每个 ILI 可以同时 link → English WN → Japanese WN → GermaNet synset
+-- 对比 GermaNet (图宾根大学, 需注册):
+--   GermaNet 20.0 ≈ 15 万 synset, 但约 60% 有 ILI, 需机构邮箱注册
+--   ODeNet 1.4 ≈ 3.6 万 synset, 100% ILI, 完全开源, 无门槛
+--   两者 schema 兼容 (表名 germanet_* 保留, 数据源切换到 ODeNet)
+--
+-- 核心优势:
+--   ILI 枢纽 → English WN (通过 OMW) ↔ ODeNet ↔ Japanese WordNet
 --   这是 MUJI 语义母机 "跨语言刻度统一" 的核心基础设施
---
--- 复合词特殊处理: GermaNet 专门对复合词语义关系建模 (CompoundMeronym/Holonym),
--- 不只是简单拆分, 还记录部分-整体语义关系类型 (位置? 功能? 材料?)
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;

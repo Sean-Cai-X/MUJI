@@ -44,9 +44,9 @@ enum class SourceTag : uint8_t {
     CompoundSplit  = 7,   // layer 0d — 德语复合词拆分子词元 (decompound / CompoundSplit)
     JapaneseWordNetSynset = 13,  // layer 1b — Japanese WordNet (wn-ja) 日义项节点
     JapaneseWordNetRel    = 14,  // layer 1b — Japanese WordNet 关系
-    GermaNetSynset = 12,  // layer 1c — GermaNet 德语词网义项节点
-    GermaNetRel    = 15,  // layer 1c — GermaNet 关系
-    CrossLingualAlign = 16, // layer 1x — 跨语言 synset 对齐 (WN-EN ↔ WN-JA ↔ GermaNet via ILI)
+    GermaNetSynset = 12,  // layer 1c — 德语词网义项节点 (当前使用 ODeNet 1.4, GermaNet 占位保留)
+    GermaNetRel    = 15,  // layer 1c — 德语词网关系
+    CrossLingualAlign = 16, // layer 1x — 跨语言 synset 对齐 (WN-EN ↔ WN-JA ↔ ODeNet via ILI)
 };
 
 inline const char* to_cstr(SourceTag t) {
