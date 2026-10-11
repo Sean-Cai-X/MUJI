@@ -324,3 +324,7 @@ if(MUJI_HAS_MECAB)
     target_link_libraries(mecab_cli PRIVATE muji_mecab)
     set_target_properties(mecab_cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 endif()
+
+# decompound_cli — standalone German compound word splitter (no external deps)
+add_executable(decompound_cli ${CMAKE_SOURCE_DIR}/src/native/decompound_cli.cpp)
+set_target_properties(decompound_cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
