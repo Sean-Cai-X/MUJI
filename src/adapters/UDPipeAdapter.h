@@ -1,21 +1,18 @@
 // src/adapters/UDPipeAdapter.h
 // Glue-layer adapter for UDPipe (layer 0c — German + multi-language UDP pipeline).
 //
-// 原生入口: src/native/udpipe_cli.cpp (独立 CLI) + 系统 udpipe 二进制
+// 原生入口: src/native/udpipe_cli.cpp (独立 CLI, 后续实现) + 编译好的 udpipe 二进制
 //
-// 胶水层模式:
-//   优先调用 UDPipe C++ API (如果已安装)；
-//   否则 fallback 到 subprocess 调用 `udpipe --outfmt conllu model` 并解析 CoNLL-U 输出。
+// 胶水层三种模式 (mode 字段选择):
+//   "cli"   — subprocess 调用本地 udpipe 二进制 + 本地模型文件 (离线)
+//   "rest"  — HTTP POST 到 UDPipe REST 服务 (LINDAT 在线服务, 无需本地模型)
+//   "auto"  — init 时先测 REST, 通就用 REST; 否则 fallback CLI
 //
 // 统一输出: muji::SemToken (与 Jieba/MeCab 完全一致)
 //
 // UDPipe 输出 CoNLL-U 格式 (每行一个 word, TAB 分隔 10 列):
 //   ID    FORM   LEMMA   UPOS   XPOS   FEATS   HEAD   DEPREL   DEPS   MISC
 //   1     Die    die     DET    ART    ...     2      det      ...    ...
-//
-// UDPipe 模型文件 (示例):
-//   german-gsd.udpipe   — Universal Dependencies German GSD
-//   german-hdt.udpipe   — German HDT (科研场景优先)
 
 #pragma once
 
@@ -29,14 +26,16 @@
 namespace muji {
 
 struct UDPipeConfig {
-    std::string model_path;          // UDPipe 模型 e.g. "de/german-gsd.udpipe"
-    std::string udpipe_bin;          // udpipe CLI 路径 (默认从 PATH 找)
-    bool        tokenize = true;
-    bool        tag      = true;     // 启用 UPOS + XPOS
-    bool        lemmatize = true;    // 启用 lemma
-    bool        parse    = false;     // 依存句法 (可选)
-    std::string upos_mode = "upos";  // "upos" (Universal) / "xpos" (STTS for German)
-    bool        prefer_cli = true;   // true=subprocess CLI, false=direct C++ API (如可用)
+    std::string mode = "auto";        // "cli" | "rest" | "auto"
+    std::string model_path;           // CLI 模式: 本地模型路径
+    std::string model_name;           // REST 模式: 模型名 (默认 "german-gsd")
+    std::string udpipe_bin;           // CLI 模式: udpipe 二进制路径
+    std::string rest_url = "http://lindat.mff.cuni.cz/services/udpipe/api/process";
+    bool        tokenize  = true;
+    bool        tag       = true;      // 启用 UPOS + XPOS
+    bool        lemmatize = true;      // 启用 lemma
+    bool        parse     = false;     // 依存句法 (可选)
+    std::string upos_mode = "upos";   // "upos" (Universal) / "xpos" (STTS for German)
 };
 
 class UDPipeAdapter : public AbstractAdapter {
@@ -71,11 +70,19 @@ public:
 private:
     UDPipeConfig config_;
     bool initialized_ = false;
+    std::string resolved_mode_ = "cli";   // init() 后确定的实际模式
 
-    // CoNLL-U 解析辅助
+    // CoNLL-U 解析 (CLI 和 REST 共享)
     static std::vector<SemToken> parse_conllu(const std::string& conllu_output,
                                                const std::string& original_text,
                                                const UDPipeConfig& cfg);
+
+    // 两种后端实现
+    std::string call_cli(const std::string& text) const;
+    std::string call_rest(const std::string& text) const;
+
+    // 探测 REST 连通性
+    bool probe_rest() const;
 };
 
 } // namespace muji

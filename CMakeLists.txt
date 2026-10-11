@@ -159,6 +159,7 @@ endif()
 # 输出 CoNLL-U 格式 → UDPipeAdapter 解析成统一 SemToken
 find_program(UDPIPE_BIN udpipe
     HINTS /usr/bin /usr/local/bin
+          /H/usr/aisrc/udpipe
           ${CMAKE_SOURCE_DIR}/toolchain-rootfs/usr/bin
     NO_DEFAULT_PATH)
 if(NOT UDPIPE_BIN)

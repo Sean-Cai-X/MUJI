@@ -94,16 +94,24 @@ static bool init_modules() {
 
 #ifdef MUJI_HAS_UDPIPE
     // Layer 0c: UDPipe (German + multi-language UDP pipeline)
+    // mode: auto → 先测 REST (LINDAT), 通就 REST; 否则 fallback CLI
+    // env: MUJI_UDPIPE_MODE (rest|cli|auto), MUJI_UDPIPE_MODEL, MUJI_UDPIPE_MODEL_PATH, MUJI_UDPIPE_BIN
     auto udp = muji::make_and_register<muji::UDPipeAdapter>();
     muji::UDPipeConfig udp_cfg;
-    // 模型文件路径 (UDPipe 原生 CLI 也支持)
-    udp_cfg.model_path = "/H/aisrc/MUJI/models/de/german-gsd.udpipe";
+    const char* env_mode  = std::getenv("MUJI_UDPIPE_MODE");
+    const char* env_model = std::getenv("MUJI_UDPIPE_MODEL");
+    const char* env_mpath = std::getenv("MUJI_UDPIPE_MODEL_PATH");
+    const char* env_bin   = std::getenv("MUJI_UDPIPE_BIN");
+    udp_cfg.mode       = env_mode  ? env_mode  : "auto";
+    udp_cfg.model_name = env_model ? env_model : "german-gsd";
+    udp_cfg.model_path = env_mpath ? env_mpath : "/H/usr/aisrc/models/de/german-gsd.udpipe";
+    udp_cfg.udpipe_bin = env_bin   ? env_bin   : "/H/usr/aisrc/udpipe/udpipe";
     if (udp->init()) {
-        std::fprintf(stderr, "UDPipeAdapter ready (model=%s)\n", udp_cfg.model_path.c_str());
+        std::fprintf(stderr, "UDPipeAdapter ready (mode=%s model=%s)\n",
+                     udp_cfg.mode.c_str(), udp_cfg.model_name.c_str());
         { FILE* t = std::fopen("/tmp/muji_trigger_0c.txt", "w"); if (t) { std::fprintf(t, "0c-udpipe-OK\n"); std::fclose(t); } }
     } else {
-        std::fprintf(stderr, "UDPipeAdapter init (continuing — model may be missing): %s\n",
-                     udp->last_error().c_str());
+        std::fprintf(stderr, "UDPipeAdapter init (continuing): %s\n", udp->last_error().c_str());
     }
 #endif
 
@@ -445,7 +453,7 @@ static void show_german_panel() {
                               "  [%zu] \"%s\" → lemma=\"%s\" pos=%s",
                               pi, part.surface.c_str(),
                               part.lemma.c_str(), part.pos.c_str());
-                ImGui::BulletTextColored(path_color, "%s", part_label);
+                ImGui::Bullet(); ImGui::TextColored(path_color, "%s", part_label);
             }
 
             // GermaNet 对齐占位 (未来对接)
