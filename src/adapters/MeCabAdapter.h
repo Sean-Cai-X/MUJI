@@ -1,15 +1,9 @@
 // src/adapters/MeCabAdapter.h
 // Glue-layer adapter for MeCab (layer 0b — Japanese morphological analysis).
 //
-// Native entry point preserved: see src/native/mecab_cli.cpp
-// (standalone command-line tool, compiles independently, bypasses ImGui
-// and the glue layer entirely — the module stays 100% upgradeable).
-//
-// This adapter only:
-//   - forwards calls to MeCab C API (mecab_new / mecab_parse_lattice)
-//   - converts MeCab morpheme output → muji::SemToken
-//   - fills SemToken.lemma and SemToken.reading (MeCab 扩展字段)
-//   - does NOT modify MeCab logic or hold MeCab handle after shutdown
+// Native entry point: /usr/local/bin/mecab (Debian 原生二进制, 独立运行/升级).
+// MeCabAdapter uses subprocess popen to call the native mecab binary,
+// parsing ChaSen-format output → muji::SemToken. Zero C API link dependency.
 
 #pragma once
 
@@ -18,20 +12,17 @@
 
 #include <string>
 #include <vector>
-#include <memory>
-
-// fwd — only #include <mecab.h> in .cpp
-struct mecab_t;
 
 namespace muji {
 
 struct MeCabConfig {
-    std::string dicdir;        // 词典目录 e.g. "/var/lib/mecab/dic/ipadic-utf8"
-    std::string rcfile;        // mecabrc 路径 (空=用内置默认)
+    std::string dicdir;        // 词典目录 e.g. ".../ipadic-utf8"
+    std::string rcfile;        // mecabrc 路径 (空=/dev/null)
     std::string userdic;       // 用户词典 (可选)
-    bool        partial = false;  // 部分解析模式 (partial parsing)
-    bool        marginal = false;  // 边缘概率模式
-    int         nb1est = 1;      // N-best 候选数 (默认 1)
+    std::string mecab_bin;     // mecab 二进制路径 (空=自动搜)
+    bool        partial = false;
+    bool        marginal = false;
+    int         nb1est = 1;
 };
 
 class MeCabAdapter : public AbstractAdapter {
@@ -42,29 +33,31 @@ public:
     bool init() override;
     bool shutdown() override;
 
-    // ── Query API ───────────────────────────────────────────────────
-    // Morphologically analyze text → tokens.
-    // Fills SemToken.{word, lemma, pos, reading, start, end, source}.
-    // SourceTag = MeCabMorpheme (区别于 JiebaToken).
     bool segment(const std::string& text,
                  std::vector<SemToken>& out) const;
 
-    // Convenience overload
     std::vector<SemToken> segment(const std::string& text) const {
         std::vector<SemToken> r;
         segment(text, r);
         return r;
     }
 
-    // ── Config ─────────────────────────────────────────────────────
     void set_config(const MeCabConfig& c) { config_ = c; }
     const MeCabConfig& config() const     { return config_; }
 
     bool reload();
 
+    // 解析 ChaSen 格式 mecab 输出 → SemToken 列表 (static, 可独立测试)
+    static std::vector<SemToken> parse_chasen(
+        const std::string& chasen_output,
+        const std::string& original_text);
+
 private:
     MeCabConfig config_;
-    mecab_t*    mecab_ = nullptr;   // C API handle (not owning via unique_ptr)
+    std::string resolved_bin_;   // init() 后确定的 mecab 二进制完整路径
+
+    // 构造完整 mecab 命令行 (含所有 flag + dicdir + rcfile)
+    std::string build_command() const;
 };
 
 } // namespace muji
